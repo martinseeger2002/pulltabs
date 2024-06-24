@@ -9,7 +9,7 @@ api_key = "84a74543a2ac4ac1993bd77e38acb312"
 wallet_address = "DDwPZVz1TRn9gAcXoFP2XuryvW72kyDZqq"
 base_api_url = f"https://api.blockcypher.com/v1/doge/main/addrs/{wallet_address}/full?token={api_key}"
 check_interval = 500  # Check interval in seconds
-max_additional_calls = 7  # Maximum number of additional API calls
+max_additional_calls = 1  # Maximum number of additional API calls
 
 # File paths
 transaction_log_path = os.path.join(os.getcwd(), "transactions.log")
@@ -54,7 +54,7 @@ def update_log(new_transactions):
     print(f"Updating transaction log with {len(new_transactions)} new transactions...")
     with open(transaction_log_path, "a") as f:
         for tx in new_transactions:
-            timestamp = datetime.strptime(tx['confirmed'], "%Y-%m-%dT%H:%M:%SZ")
+            timestamp = datetime.strptime(tx['confirmed'], "%Y-%m-%dT%H:%M:%SZ") if 'confirmed' in tx else datetime.now()
             log_entry = f"{timestamp.strftime('%Y-%m-%d %H:%M:%S')} - Received {tx['value'] / 1e8} DOGE from {tx['sender']} in transaction {tx['tx_hash']}\n"
             f.write(log_entry)
     print("Transaction log updated successfully.")
@@ -91,7 +91,7 @@ def main():
                     "tx_hash": tx_hash,
                     "value": value,
                     "sender": sender_address,
-                    "confirmed": tx["confirmed"]
+                    "confirmed": tx.get("confirmed", datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ"))
                 })
         
         new_transactions.sort(key=lambda x: x['confirmed'])
