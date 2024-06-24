@@ -5,11 +5,11 @@ import time
 from datetime import datetime
 
 # Configuration
-api_key = ""
+api_key = "84a74543a2ac4ac1993bd77e38acb312"
 wallet_address = "DDwPZVz1TRn9gAcXoFP2XuryvW72kyDZqq"
 base_api_url = f"https://api.blockcypher.com/v1/doge/main/addrs/{wallet_address}/full?token={api_key}"
-check_interval = 300  # Check interval in seconds
-max_additional_calls = 1  # Maximum number of additional API calls
+check_interval = 30  # Check interval in seconds
+max_additional_calls = 3  # Maximum number of additional API calls
 
 # File paths
 transaction_log_path = os.path.join(os.getcwd(), "transactions.log")
@@ -69,7 +69,9 @@ def update_tab_que(new_transactions):
         tab_que = {"tabQue": []}
     
     for tx in new_transactions:
-        tab_que["tabQue"].append({"dogecoin_address": tx["sender"]})
+        count = tx["value"] // 1_000_000_000  # 10 DOGE in satoshis
+        for _ in range(count):
+            tab_que["tabQue"].append({"dogecoin_address": tx["sender"]})
     
     with open(tab_que_path, "w") as f:
         json.dump(tab_que, f, indent=4)
