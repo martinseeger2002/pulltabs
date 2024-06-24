@@ -1,176 +1,109 @@
 import os
-import time
-import logging
-import json
 import requests
-from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
-from http.client import RemoteDisconnected
+import json
+import time
 from datetime import datetime
 
-# Set environment variables
-os.environ['NODE_RPC_URL'] = '192.168.68.105:22555'
-os.environ['NODE_RPC_USER'] = 'your_rpc_user'
-os.environ['NODE_RPC_PASS'] = 'your_rpc_password'
+# Configuration
+api_key = "84a74543a2ac4ac1993bd77e38acb312"
+wallet_address = "DDwPZVz1TRn9gAcXoFP2XuryvW72kyDZqq"
+base_api_url = f"https://api.blockcypher.com/v1/doge/main/addrs/{wallet_address}/full?token={api_key}"
+check_interval = 500  # Check interval in seconds
+max_additional_calls = 7  # Maximum number of additional API calls
 
-# Retrieve environment variables
-rpc_host = os.getenv('NODE_RPC_URL')
-rpc_user = os.getenv('NODE_RPC_USER')
-rpc_password = os.getenv('NODE_RPC_PASS')
+# File paths
+transaction_log_path = os.path.join(os.getcwd(), "transactions.log")
+tab_que_path = os.path.join(os.getcwd(), "./PullTab/jsons/tabQue.json")
 
-# Construct the RPC URL with credentials
-rpc_url = f'http://{rpc_user}:{rpc_password}@{rpc_host}'
+def get_transactions(api_url):
+    print("Fetching transactions from API...")
+    transactions = []
+    api_calls = 0
+    while api_url and api_calls <= max_additional_calls:
+        response = requests.get(api_url)
+        api_calls += 1
+        if response.status_code == 200:
+            response_json = response.json()
+            transactions.extend(response_json.get('txs', []))
+            print(f"Fetched {len(response_json.get('txs', []))} transactions.")
+            if response_json.get('hasMore') and api_calls <= max_additional_calls:
+                api_url = f"{base_api_url}&before={transactions[-1]['block_height']}"
+                print("More transactions available, fetching next batch...")
+            else:
+                api_url = None
+        else:
+            print(f"Failed to fetch transactions from API. Status code: {response.status_code}")
+            print(f"Response: {response.text}")
+            return [], api_calls
+    print("All transactions fetched successfully.")
+    return transactions, api_calls
 
-# Print to debug the environment variable values
-print(f"Connecting to {rpc_url}")
-
-# Dogecoin address to listen to
-watch_address = 'DDwPZVz1TRn9gAcXoFP2XuryvW72kyDZqq'
-
-# Setup logging
-logging.basicConfig(filename='transactions.log', level=logging.INFO,
-                    format='%(asctime)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-
-def create_rpc_connection():
-    return AuthServiceProxy(rpc_url)
-
-def get_latest_block(rpc_connection):
+def parse_log():
+    print("Parsing existing transaction log...")
     try:
-        return rpc_connection.getbestblockhash()
-    except (JSONRPCException, RemoteDisconnected, OSError) as e:
-        print(f"An error occurred while fetching the latest block: {e}")
-        return None
-
-def get_block_transactions(rpc_connection, block_hash):
-    try:
-        block = rpc_connection.getblock(block_hash)
-        return block['tx']
-    except (JSONRPCException, RemoteDisconnected, OSError) as e:
-        print(f"An error occurred while fetching block transactions: {e}")
+        with open(transaction_log_path, "r") as f:
+            lines = f.readlines()
+        tx_hashes = [line.split()[-1] for line in lines if "in transaction" in line]
+        print(f"Found {len(tx_hashes)} existing transaction hashes.")
+        return tx_hashes
+    except FileNotFoundError:
+        print("Transaction log not found. Creating a new one.")
         return []
 
-def get_transaction_details(rpc_connection, txid):
+def update_log(new_transactions):
+    print(f"Updating transaction log with {len(new_transactions)} new transactions...")
+    with open(transaction_log_path, "a") as f:
+        for tx in new_transactions:
+            timestamp = datetime.strptime(tx['confirmed'], "%Y-%m-%dT%H:%M:%SZ")
+            log_entry = f"{timestamp.strftime('%Y-%m-%d %H:%M:%S')} - Received {tx['value'] / 1e8} DOGE from {tx['sender']} in transaction {tx['tx_hash']}\n"
+            f.write(log_entry)
+    print("Transaction log updated successfully.")
+
+def update_tab_que(new_transactions):
+    print("Updating tabQue.json with new transactions...")
     try:
-        raw_tx = rpc_connection.getrawtransaction(txid)
-        decoded_tx = rpc_connection.decoderawtransaction(raw_tx)
-        return decoded_tx
-    except (JSONRPCException, RemoteDisconnected, OSError) as e:
-        print(f"An error occurred while fetching transaction details: {e}")
-        return None
-
-def get_previous_output_address(rpc_connection, tx_input):
-    try:
-        raw_tx = rpc_connection.getrawtransaction(tx_input['txid'])
-        decoded_tx = rpc_connection.decoderawtransaction(raw_tx)
-        output = decoded_tx['vout'][tx_input['vout']]
-        addresses = output['scriptPubKey'].get('addresses', [])
-        return addresses[0] if addresses else 'unknown'
-    except (JSONRPCException, RemoteDisconnected, OSError) as e:
-        print(f"An error occurred while fetching previous output address: {e}")
-        return 'unknown'
-
-def initialize_tabque_json(json_file_name):
-    if not os.path.exists(json_file_name) or os.path.getsize(json_file_name) == 0:
-        with open(json_file_name, 'w') as file:
-            json.dump({'tabQue': []}, file)
-
-def update_tabque_json(address, amount):
-    json_file_name = r'C:\doginals-main\PullTab\jsons\tabQue.json'
-    try:
-        initialize_tabque_json(json_file_name)
-        with open(json_file_name, 'r') as file:
-            data = json.load(file)
-        
-        entries_to_add = int(amount // 10)
-        new_entries = [{'dogecoin_address': address} for _ in range(entries_to_add)]
-        
-        data['tabQue'].extend(new_entries)
-        
-        with open(json_file_name, 'w') as file:
-            json.dump(data, file, indent=4)
-        
-        print(f"Added {entries_to_add} entries to {json_file_name} for address: {address}")
-    except Exception as e:
-        print(f"Error updating {json_file_name}: {e}")
-
-def process_transactions(rpc_connection, transactions, processed_txids):
-    for txid in transactions:
-        if txid not in processed_txids:
-            tx_details = get_transaction_details(rpc_connection, txid)
-            if tx_details:
-                for output in tx_details['vout']:
-                    if 'addresses' in output['scriptPubKey'] and watch_address in output['scriptPubKey']['addresses']:
-                        amount = output['value']
-                        from_address = get_previous_output_address(rpc_connection, tx_details['vin'][0])
-                        log_message = f"Received {amount} DOGE from {from_address} in transaction {txid}"
-                        if log_message not in processed_txids:
-                            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                            full_log_message = f"{timestamp} - {log_message}"
-                            print(full_log_message)
-                            logging.info(full_log_message)
-                            processed_txids.add(log_message)
-                        
-                        if amount >= 10:
-                            update_tabque_json(from_address, amount)
-
-def check_api_and_update_log():
-    api_url = f'https://api.blockcypher.com/v1/doge/main/addrs/{watch_address}/full'
-    try:
-        response = requests.get(api_url)
-        if response.status_code == 200:
-            transactions = response.json().get('txs', [])
-            with open('transactions.log', 'r') as log_file:
-                logged_txids = set(line.split()[-1] for line in log_file.readlines() if 'transaction' in line)
-            new_transactions = [tx for tx in transactions if tx['hash'] not in logged_txids]
-            if new_transactions:
-                with open('transactions.log', 'a') as log_file:
-                    for tx in new_transactions:
-                        amount = sum(output['value'] for output in tx['outputs'] if watch_address in output['addresses'])
-                        from_address = tx['inputs'][0]['addresses'][0]
-                        # Handle timestamps with and without microseconds
-                        try:
-                            timestamp = datetime.strptime(tx['received'], '%Y-%m-%dT%H:%M:%S.%fZ').strftime('%Y-%m-%d %H:%M:%S')
-                        except ValueError:
-                            timestamp = datetime.strptime(tx['received'], '%Y-%m-%dT%H:%M:%SZ').strftime('%Y-%m-%d %H:%M:%S')
-                        log_message = f"Received {amount / 1e8} DOGE from {from_address} in transaction {tx['hash']}"
-                        full_log_message = f"{timestamp} - {log_message}"
-                        if tx['hash'] not in logged_txids:
-                            print(full_log_message)
-                            logging.info(full_log_message)
-                            log_file.write(full_log_message + '\n')
-                        if amount >= 10 * 1e8:
-                            update_tabque_json(from_address, amount / 1e8)
-        else:
-            print(f"Error checking API: Status code {response.status_code}")
-    except requests.RequestException as e:
-        print(f"Error checking API: {e}")
+        with open(tab_que_path, "r") as f:
+            tab_que = json.load(f)
+    except FileNotFoundError:
+        print("tabQue.json not found. Creating a new one.")
+        tab_que = {"tabQue": []}
+    
+    for tx in new_transactions:
+        tab_que["tabQue"].append({"dogecoin_address": tx["sender"]})
+    
+    with open(tab_que_path, "w") as f:
+        json.dump(tab_que, f, indent=4)
+    print("tabQue.json updated successfully.")
 
 def main():
-    print(f"Listening for transactions to {watch_address}...")
-    processed_txids = set()
-    retry_attempts = 0
-    max_retries = 5  # Maximum number of retries before exiting
-    retry_delay = 10  # Delay in seconds between retries
-
     while True:
-        rpc_connection = create_rpc_connection()
-
-        latest_block_hash = get_latest_block(rpc_connection)
-        if latest_block_hash is None:
-            retry_attempts += 1
-            if retry_attempts > max_retries:
-                print("Max retries reached. Exiting.")
-                break
-            print(f"Reconnecting to the Dogecoin node... (Attempt {retry_attempts}/{max_retries})")
-            time.sleep(retry_delay)
-            continue
-        else:
-            retry_attempts = 0  # Reset retry attempts on successful connection
-
-        block_transactions = get_block_transactions(rpc_connection, latest_block_hash)
-        process_transactions(rpc_connection, block_transactions, processed_txids)
-
-        check_api_and_update_log()
-        time.sleep(21600)  # Check the API and update every 6 hours
+        print("Starting new transaction check cycle...")
+        existing_tx_hashes = parse_log()
+        transactions, api_calls = get_transactions(base_api_url)
+        
+        new_transactions = []
+        for tx in transactions:
+            tx_hash = tx["hash"]
+            if tx_hash not in existing_tx_hashes:
+                sender_address = tx["addresses"][0] if "addresses" in tx and tx["addresses"] else "Unknown"
+                value = sum(output["value"] for output in tx["outputs"] if wallet_address in output["addresses"])
+                new_transactions.append({
+                    "tx_hash": tx_hash,
+                    "value": value,
+                    "sender": sender_address,
+                    "confirmed": tx["confirmed"]
+                })
+        
+        new_transactions.sort(key=lambda x: x['confirmed'])
+        
+        if new_transactions:
+            update_log(new_transactions)
+            update_tab_que(new_transactions)
+        
+        print(f"Scanned {len(transactions)} transactions in {api_calls} API calls. Found {len(new_transactions)} new transactions.")
+        print(f"Waiting for {check_interval} seconds before next check...\n")
+        
+        time.sleep(check_interval)
 
 if __name__ == "__main__":
     main()
