@@ -5,7 +5,7 @@ import time
 from datetime import datetime
 
 # Configuration
-api_key = "84a74543a2ac4ac1993bd77e38acb312"
+api_key = ""
 wallet_address = "DDwPZVz1TRn9gAcXoFP2XuryvW72kyDZqq"
 base_api_url = f"https://api.blockcypher.com/v1/doge/main/addrs/{wallet_address}/full?token={api_key}"
 check_interval = 30  # Check interval in seconds
