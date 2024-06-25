@@ -6,7 +6,7 @@ from datetime import datetime
 
 # Configuration
 api_key = ""
-wallet_address = "DDwPZVz1TRn9gAcXoFP2XuryvW72kyDZqq"
+wallet_address = ""
 base_api_url = f"https://api.blockcypher.com/v1/doge/main/addrs/{wallet_address}/full?token={api_key}"
 check_interval = 30  # Check interval in seconds
 max_additional_calls = 3  # Maximum number of additional API calls
